@@ -1,0 +1,18 @@
+plugin:
+  name: BillingPlans
+  identifier: billingplans
+  description: 'Sell servers as renewable billing plans with credit-based billing — a full WHMCS-style subscription engine for FeatherPanel!'
+  flags:
+    - hasEvents
+  version: 1.0.0
+  target: v2
+  author:
+    - NaysKutzu
+    - MythicalSystems
+  icon: 'https://cdn.mythical.systems/featherpanel/paid.png'
+  requiredConfigs: {  }
+  dependencies:
+    - php=8.5
+    - php-ext=pdo
+    - plugin=billingcore
+config: {  }

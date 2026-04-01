@@ -1,0 +1,15 @@
+ALTER TABLE `featherpanel_billingplans_plans`
+    ADD COLUMN `long_description` TEXT NULL DEFAULT NULL COMMENT 'Rich/long description shown on plan detail page' AFTER `description`,
+    ADD COLUMN `node_id` INT(11) NULL DEFAULT NULL COMMENT 'Specific node to deploy on (NULL = auto-pick from any available)' AFTER `server_config`,
+    ADD COLUMN `realms_id` INT(11) NULL DEFAULT NULL COMMENT 'Realm (Nest) for the auto-created server' AFTER `node_id`,
+    ADD COLUMN `spell_id` INT(11) NULL DEFAULT NULL COMMENT 'Spell (Egg) for the auto-created server' AFTER `realms_id`,
+    ADD COLUMN `memory` INT(11) NOT NULL DEFAULT 512 COMMENT 'RAM in MB' AFTER `spell_id`,
+    ADD COLUMN `cpu` INT(11) NOT NULL DEFAULT 100 COMMENT 'CPU limit in percent' AFTER `memory`,
+    ADD COLUMN `disk` INT(11) NOT NULL DEFAULT 1024 COMMENT 'Disk in MB' AFTER `cpu`,
+    ADD COLUMN `swap` INT(11) NOT NULL DEFAULT 0 COMMENT 'Swap in MB' AFTER `disk`,
+    ADD COLUMN `io` INT(11) NOT NULL DEFAULT 500 COMMENT 'Block IO weight' AFTER `swap`,
+    ADD COLUMN `backup_limit` INT(11) NOT NULL DEFAULT 0 AFTER `io`,
+    ADD COLUMN `database_limit` INT(11) NOT NULL DEFAULT 0 AFTER `backup_limit`,
+    ADD COLUMN `allocation_limit` INT(11) NULL DEFAULT NULL AFTER `database_limit`,
+    ADD COLUMN `startup_override` TEXT NULL DEFAULT NULL COMMENT 'Custom startup command (overrides egg default if set)' AFTER `allocation_limit`,
+    ADD COLUMN `image_override` VARCHAR(255) NULL DEFAULT NULL COMMENT 'Custom Docker image (overrides egg default if set)' AFTER `startup_override`;

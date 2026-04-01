@@ -1,0 +1,108 @@
+#!/bin/bash
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Configuration
+PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PASSWORD="featherpanel_development_kit_2025_addon_password"
+TEMP_DIR=$(mktemp -d)
+EXPORT_FILE="${TEMP_DIR}/plugin.fpa"
+
+echo -e "${GREEN}Starting plugin build process...${NC}"
+
+# Step 1: Build frontend
+if [ -d "${PLUGIN_DIR}/Frontend/App" ]; then
+    echo -e "${YELLOW}Building frontend...${NC}"
+    cd "${PLUGIN_DIR}/Frontend/App"
+    
+    if [ -f "pnpm-lock.yaml" ]; then
+        echo -e "${YELLOW}Installing with pnpm...${NC}"
+        if ! pnpm install --frozen-lockfile 2>&1; then
+            echo -e "${YELLOW}Lockfile config mismatch detected, updating lockfile...${NC}"
+            pnpm install --no-frozen-lockfile
+        fi
+        BUILD_CMD="pnpm build"
+    elif [ -f "package-lock.json" ]; then
+        echo -e "${YELLOW}Installing with npm...${NC}"
+        npm ci || npm install
+        BUILD_CMD="npm run build"
+    else
+        echo -e "${YELLOW}No lockfile found, using pnpm...${NC}"
+        pnpm install || npm install
+        BUILD_CMD="pnpm build || npm run build"
+    fi
+    
+    echo -e "${YELLOW}Building frontend...${NC}"
+    eval "${BUILD_CMD}"
+    
+    echo -e "${GREEN}Frontend build completed${NC}"
+    cd "${PLUGIN_DIR}"
+else
+    echo -e "${YELLOW}No Frontend/App directory found, skipping frontend build${NC}"
+fi
+
+# Step 2: Parse conf.yml
+echo -e "${YELLOW}Reading plugin configuration...${NC}"
+CONF_FILE="${PLUGIN_DIR}/conf.yml"
+if [ ! -f "${CONF_FILE}" ]; then
+    echo -e "${RED}Error: conf.yml not found${NC}"
+    exit 1
+fi
+
+PLUGIN_VERSION=$(grep -E "^\s*version:" "${CONF_FILE}" | sed -E 's/.*version:\s*["'"'"']?([^"'"'"']+)["'"'"']?/\1/' | tr -d ' ')
+PLUGIN_IDENTIFIER=$(grep -E "^\s*identifier:" "${CONF_FILE}" | sed -E 's/.*identifier:\s*["'"'"']?([^"'"'"']+)["'"'"']?/\1/' | tr -d ' ')
+
+if [ -z "${PLUGIN_VERSION}" ] || [ -z "${PLUGIN_IDENTIFIER}" ]; then
+    echo -e "${RED}Error: Could not extract version/identifier from conf.yml${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}Plugin: ${PLUGIN_IDENTIFIER} v${PLUGIN_VERSION}${NC}"
+
+# Step 3: Parse .featherexport exclusions
+EXCLUSIONS=()
+EXPORT_IGNORE="${PLUGIN_DIR}/.featherexport"
+if [ -f "${EXPORT_IGNORE}" ]; then
+    echo -e "${YELLOW}Reading .featherexport exclusions...${NC}"
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        if [ -z "$line" ] || [[ "$line" =~ ^# ]]; then continue; fi
+        line=$(echo "$line" | sed 's/#.*$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        if [ -n "$line" ]; then EXCLUSIONS+=("$line"); fi
+    done < "${EXPORT_IGNORE}"
+fi
+EXCLUSIONS+=(".featherexport")
+
+# Step 4: Create .fpa
+echo -e "${YELLOW}Creating .fpa archive...${NC}"
+cd "${PLUGIN_DIR}"
+
+if [ ${#EXCLUSIONS[@]} -gt 0 ]; then
+    EXCLUSION_ARGS=()
+    for pattern in "${EXCLUSIONS[@]}"; do
+        PATTERN=$(echo "$pattern" | sed 's|^/||')
+        EXCLUSION_ARGS+=("-x" "$PATTERN")
+    done
+    zip -r -P "${PASSWORD}" "${EXPORT_FILE}" * "${EXCLUSION_ARGS[@]}"
+else
+    zip -r -P "${PASSWORD}" "${EXPORT_FILE}" *
+fi
+
+FINAL_EXPORT="${PLUGIN_DIR}/${PLUGIN_IDENTIFIER}-${PLUGIN_VERSION}.fpa"
+mv "${EXPORT_FILE}" "${FINAL_EXPORT}"
+
+echo -e "${GREEN}Created: ${FINAL_EXPORT}${NC}"
+
+if [ -n "${GITHUB_OUTPUT}" ]; then
+    echo "export_file=${FINAL_EXPORT}" >> "${GITHUB_OUTPUT}"
+    echo "plugin_version=${PLUGIN_VERSION}" >> "${GITHUB_OUTPUT}"
+    echo "plugin_identifier=${PLUGIN_IDENTIFIER}" >> "${GITHUB_OUTPUT}"
+fi
+
+rm -rf "${TEMP_DIR}"
+echo -e "${GREEN}Build completed successfully!${NC}"

@@ -1,0 +1,29 @@
+{
+  "client": {
+    "/billing/plans": {
+      "name": "Billing Plans",
+      "icon": "💳",
+      "lucideIcon": "credit-card",
+      "showBadge": false,
+      "redirect": "/billing/plans",
+      "component": "/billingplans/dist/client.html",
+      "description": "Browse and manage your server plans",
+      "category": "client",
+      "group": "Billing"
+    }
+  },
+  "admin": {
+    "/billingplans": {
+      "name": "Billing Plans",
+      "icon": "💳",
+      "lucideIcon": "credit-card",
+      "showBadge": false,
+      "redirect": "/billingplans",
+      "component": "/billingplans/dist/admin.html",
+      "description": "Manage billing plans and subscriptions",
+      "category": "admin",
+      "group": "Billing"
+    }
+  },
+  "server": {}
+}

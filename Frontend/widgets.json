@@ -1,0 +1,25 @@
+[
+	{
+		"id": "billingplans-admin-user-billing-overview",
+		"component": "billingplans/dist/admin-user-subscriptions-widget.html",
+		"enabled": true,
+		"priority": 80,
+		"page": "admin-users-edit",
+		"location": "bottom-of-page",
+		"pluginName": "Billing Plans",
+		"title": "Billing & subscription plans",
+		"description": "Subscriptions and plans for this user.",
+		"icon": "BP",
+		"size": "full",
+		"card": {
+			"enabled": true,
+			"padding": "none",
+			"header": {
+				"show": true
+			}
+		},
+		"iframe": {
+			"minHeight": "1299px"
+		}
+	}
+]
