@@ -29,20 +29,20 @@ use App\Addons\billingplans\Chat\Category;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-#[OA\Tag(name: 'Admin - Billing Plans', description: 'Manage billing plans')]
+// #[OA\Tag(name: 'Admin - Billing Plans', description: 'Manage billing plans')]
 class PlansController
 {
-    #[OA\Get(
-        path: '/api/admin/billingplans/plans',
-        summary: 'List all plans',
-        tags: ['Admin - Billing Plans'],
-        parameters: [
-            new OA\Parameter(name: 'page', in: 'query', schema: new OA\Schema(type: 'integer', default: 1)),
-            new OA\Parameter(name: 'limit', in: 'query', schema: new OA\Schema(type: 'integer', default: 20)),
-            new OA\Parameter(name: 'search', in: 'query', schema: new OA\Schema(type: 'string')),
-        ],
-        responses: [new OA\Response(response: 200, description: 'Plans retrieved successfully')]
-    )]
+    // #[OA\Get(
+    //     path: '/api/admin/billingplans/plans',
+    //     summary: 'List all plans',
+    //     tags: ['Admin - Billing Plans'],
+    //     parameters: [
+    //         new OA\Parameter(name: 'page', in: 'query', schema: new OA\Schema(type: 'integer', default: 1)),
+    //         new OA\Parameter(name: 'limit', in: 'query', schema: new OA\Schema(type: 'integer', default: 20)),
+    //         new OA\Parameter(name: 'search', in: 'query', schema: new OA\Schema(type: 'string')),
+    //     ],
+    //     responses: [new OA\Response(response: 200, description: 'Plans retrieved successfully')]
+    // )]
     public function list(Request $request): Response
     {
         $page = max(1, (int) $request->query->get('page', 1));
@@ -79,16 +79,16 @@ class PlansController
         ], 'Plans retrieved successfully', 200);
     }
 
-    #[OA\Get(
-        path: '/api/admin/billingplans/plans/{planId}',
-        summary: 'Get a plan',
-        tags: ['Admin - Billing Plans'],
-        parameters: [new OA\Parameter(name: 'planId', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
-        responses: [
-            new OA\Response(response: 200, description: 'Plan retrieved successfully'),
-            new OA\Response(response: 404, description: 'Plan not found'),
-        ]
-    )]
+    // #[OA\Get(
+    //     path: '/api/admin/billingplans/plans/{planId}',
+    //     summary: 'Get a plan',
+    //     tags: ['Admin - Billing Plans'],
+    //     parameters: [new OA\Parameter(name: 'planId', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    //     responses: [
+    //         new OA\Response(response: 200, description: 'Plan retrieved successfully'),
+    //         new OA\Response(response: 404, description: 'Plan not found'),
+    //     ]
+    // )]
     public function get(Request $request, int $planId): Response
     {
         $plan = Plan::getById($planId);
@@ -110,29 +110,29 @@ class PlansController
         return ApiResponse::success($plan, 'Plan retrieved successfully', 200);
     }
 
-    #[OA\Post(
-        path: '/api/admin/billingplans/plans',
-        summary: 'Create a plan',
-        tags: ['Admin - Billing Plans'],
-        requestBody: new OA\RequestBody(
-            required: true,
-            content: new OA\JsonContent(
-                required: ['name', 'price_credits', 'billing_period_days'],
-                properties: [
-                    new OA\Property(property: 'name', type: 'string'),
-                    new OA\Property(property: 'description', type: 'string', nullable: true),
-                    new OA\Property(property: 'price_credits', type: 'integer', minimum: 0),
-                    new OA\Property(property: 'billing_period_days', type: 'integer', minimum: 1, description: 'Billing cycle in days (7=weekly, 30=monthly, 365=yearly)'),
-                    new OA\Property(property: 'is_active', type: 'boolean'),
-                    new OA\Property(property: 'server_config', type: 'object', nullable: true),
-                ]
-            )
-        ),
-        responses: [
-            new OA\Response(response: 200, description: 'Plan created successfully'),
-            new OA\Response(response: 400, description: 'Invalid input'),
-        ]
-    )]
+    // #[OA\Post(
+    //     path: '/api/admin/billingplans/plans',
+    //     summary: 'Create a plan',
+    //     tags: ['Admin - Billing Plans'],
+    //     requestBody: new OA\RequestBody(
+    //         required: true,
+    //         content: new OA\JsonContent(
+    //             required: ['name', 'price_credits', 'billing_period_days'],
+    //             properties: [
+    //                 new OA\Property(property: 'name', type: 'string'),
+    //                 new OA\Property(property: 'description', type: 'string', nullable: true),
+    //                 new OA\Property(property: 'price_credits', type: 'integer', minimum: 0),
+    //                 new OA\Property(property: 'billing_period_days', type: 'integer', minimum: 1, description: 'Billing cycle in days (7=weekly, 30=monthly, 365=yearly)'),
+    //                 new OA\Property(property: 'is_active', type: 'boolean'),
+    //                 new OA\Property(property: 'server_config', type: 'object', nullable: true),
+    //             ]
+    //         )
+    //     ),
+    //     responses: [
+    //         new OA\Response(response: 200, description: 'Plan created successfully'),
+    //         new OA\Response(response: 400, description: 'Invalid input'),
+    //     ]
+    // )]
     public function create(Request $request): Response
     {
         $admin = $request->get('user');
@@ -156,6 +156,13 @@ class PlansController
             return ApiResponse::error('billing_period_days must be at least 1', 'INVALID_PERIOD', 400);
         }
 
+        // Multi-node support: normalize node_ids
+        $selectedNodeIds = [];
+        if (!empty($data['node_ids']) && is_array($data['node_ids'])) {
+            $selectedNodeIds = array_map('intval', $data['node_ids']);
+        } elseif (!empty($data['node_id'])) {
+            $selectedNodeIds = [(int) $data['node_id']];
+        }
         $planId = Plan::create([
             'category_id' => isset($data['category_id']) && $data['category_id'] ? (int) $data['category_id'] : null,
             'name' => trim($data['name']),
@@ -166,7 +173,8 @@ class PlansController
             'is_active' => isset($data['is_active']) ? (int) filter_var($data['is_active'], FILTER_VALIDATE_BOOLEAN) : 1,
             'max_subscriptions' => (isset($data['max_subscriptions']) && $data['max_subscriptions'] !== null && $data['max_subscriptions'] !== '') ? max(1, (int) $data['max_subscriptions']) : null,
             'server_config' => $data['server_config'] ?? null,
-            'node_id' => isset($data['node_id']) && $data['node_id'] ? (int) $data['node_id'] : null,
+            'node_ids' => $selectedNodeIds,
+            'node_id' => isset($data['node_id']) && $data['node_id'] ? (int) $data['node_id'] : null, // legacy
             'realms_id' => isset($data['realms_id']) && $data['realms_id'] ? (int) $data['realms_id'] : null,
             'user_can_choose_realm' => !empty($data['user_can_choose_realm']),
             'allowed_realms' => $data['allowed_realms'] ?? null,
@@ -202,29 +210,29 @@ class PlansController
         return ApiResponse::success($plan, 'Plan created successfully', 200);
     }
 
-    #[OA\Patch(
-        path: '/api/admin/billingplans/plans/{planId}',
-        summary: 'Update a plan',
-        tags: ['Admin - Billing Plans'],
-        parameters: [new OA\Parameter(name: 'planId', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
-        requestBody: new OA\RequestBody(
-            required: true,
-            content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'name', type: 'string'),
-                    new OA\Property(property: 'description', type: 'string', nullable: true),
-                    new OA\Property(property: 'price_credits', type: 'integer', minimum: 0),
-                    new OA\Property(property: 'billing_period_days', type: 'integer', minimum: 1),
-                    new OA\Property(property: 'is_active', type: 'boolean'),
-                    new OA\Property(property: 'server_config', type: 'object', nullable: true),
-                ]
-            )
-        ),
-        responses: [
-            new OA\Response(response: 200, description: 'Plan updated successfully'),
-            new OA\Response(response: 404, description: 'Plan not found'),
-        ]
-    )]
+    // #[OA\Patch(
+    //     path: '/api/admin/billingplans/plans/{planId}',
+    //     summary: 'Update a plan',
+    //     tags: ['Admin - Billing Plans'],
+    //     parameters: [new OA\Parameter(name: 'planId', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    //     requestBody: new OA\RequestBody(
+    //         required: true,
+    //         content: new OA\JsonContent(
+    //             properties: [
+    //                 new OA\Property(property: 'name', type: 'string'),
+    //                 new OA\Property(property: 'description', type: 'string', nullable: true),
+    //                 new OA\Property(property: 'price_credits', type: 'integer', minimum: 0),
+    //                 new OA\Property(property: 'billing_period_days', type: 'integer', minimum: 1),
+    //                 new OA\Property(property: 'is_active', type: 'boolean'),
+    //                 new OA\Property(property: 'server_config', type: 'object', nullable: true),
+    //             ]
+    //         )
+    //     ),
+    //     responses: [
+    //         new OA\Response(response: 200, description: 'Plan updated successfully'),
+    //         new OA\Response(response: 404, description: 'Plan not found'),
+    //     ]
+    // )]
     public function update(Request $request, int $planId): Response
     {
         $admin = $request->get('user');
@@ -265,6 +273,12 @@ class PlansController
         }
         if (array_key_exists('max_subscriptions', $data)) {
             $updateData['max_subscriptions'] = ($data['max_subscriptions'] !== null && $data['max_subscriptions'] !== '') ? max(1, (int) $data['max_subscriptions']) : null;
+        }
+        // Multi-node support: normalize node_ids
+        if (array_key_exists('node_ids', $data) && is_array($data['node_ids'])) {
+            $updateData['node_ids'] = array_map('intval', $data['node_ids']);
+        } elseif (array_key_exists('node_id', $data) && $data['node_id']) {
+            $updateData['node_ids'] = [(int) $data['node_id']];
         }
         if (array_key_exists('node_id', $data)) {
             $updateData['node_id'] = $data['node_id'] ? (int) $data['node_id'] : null;
@@ -322,16 +336,16 @@ class PlansController
         return ApiResponse::success($updated, 'Plan updated successfully', 200);
     }
 
-    #[OA\Delete(
-        path: '/api/admin/billingplans/plans/{planId}',
-        summary: 'Delete a plan',
-        tags: ['Admin - Billing Plans'],
-        parameters: [new OA\Parameter(name: 'planId', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
-        responses: [
-            new OA\Response(response: 200, description: 'Plan deleted successfully'),
-            new OA\Response(response: 404, description: 'Plan not found'),
-        ]
-    )]
+    // #[OA\Delete(
+    //     path: '/api/admin/billingplans/plans/{planId}',
+    //     summary: 'Delete a plan',
+    //     tags: ['Admin - Billing Plans'],
+    //     parameters: [new OA\Parameter(name: 'planId', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
+    //     responses: [
+    //         new OA\Response(response: 200, description: 'Plan deleted successfully'),
+    //         new OA\Response(response: 404, description: 'Plan not found'),
+    //     ]
+    // )]
     public function delete(Request $request, int $planId): Response
     {
         $admin = $request->get('user');
@@ -354,12 +368,12 @@ class PlansController
         return ApiResponse::success([], 'Plan deleted successfully', 200);
     }
 
-    #[OA\Get(
-        path: '/api/admin/billingplans/options',
-        summary: 'Get nodes, realms and spells for plan creation',
-        tags: ['Admin - Billing Plans'],
-        responses: [new OA\Response(response: 200, description: 'Options retrieved successfully')]
-    )]
+    // #[OA\Get(
+    //     path: '/api/admin/billingplans/options',
+    //     summary: 'Get nodes, realms and spells for plan creation',
+    //     tags: ['Admin - Billing Plans'],
+    //     responses: [new OA\Response(response: 200, description: 'Options retrieved successfully')]
+    // )]
     public function getOptions(Request $request): Response
     {
         $nodes = array_map(fn ($n) => ['id' => $n['id'], 'name' => $n['name'], 'location_id' => $n['location_id'] ?? null], Node::getAllNodes() ?: []);

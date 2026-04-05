@@ -101,7 +101,7 @@ const emptyForm = (): PlanFormData => ({
   category_id: null,
   name: "", description: null, long_description: null,
   price_credits: 0, billing_period_days: 30, is_active: true, max_subscriptions: null,
-  node_id: null, realms_id: null, spell_id: null,
+  node_ids: [], realms_id: null, spell_id: null,
   memory: 512, cpu: 100, disk: 1024, swap: 0, io: 500,
   backup_limit: 0, database_limit: 0, allocation_limit: null,
   startup_override: null, image_override: null,
@@ -231,7 +231,8 @@ const openEdit = (plan: Plan) => {
     name: plan.name, description: plan.description, long_description: plan.long_description,
     price_credits: plan.price_credits, billing_period_days: plan.billing_period_days,
     is_active: !!plan.is_active, max_subscriptions: plan.max_subscriptions,
-    node_id: plan.node_id, realms_id: plan.realms_id, spell_id: plan.spell_id,
+    node_ids: Array.isArray(plan.node_ids) ? [...plan.node_ids] : (plan.node_id != null ? [plan.node_id] : []),
+    realms_id: plan.realms_id, spell_id: plan.spell_id,
     memory: plan.memory ?? 512, cpu: plan.cpu ?? 100, disk: plan.disk ?? 1024,
     swap: plan.swap ?? 0, io: plan.io ?? 500, backup_limit: plan.backup_limit ?? 0,
     database_limit: plan.database_limit ?? 0, allocation_limit: plan.allocation_limit,
@@ -266,6 +267,8 @@ const onSpellChange = () => {
 const savePlan = async () => {
   try {
     const payload = { ...planForm.value };
+    // Remove legacy node_id if present, always send node_ids
+    delete payload.node_id;
     if (editingPlan.value) {
       await updatePlan(editingPlan.value.id, payload);
       toast.success("Plan updated!");
@@ -460,15 +463,15 @@ onMounted(() => Promise.all([loadPlans(), loadSubscriptions(), loadStats(), load
                 </div>
               </div>
               <div>
-                <label class="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Node</label>
+                <label class="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Nodes</label>
                 <div class="relative">
-                  <select v-model.number="planForm.node_id"
+                  <select v-model="planForm.node_ids" multiple
                     class="flex h-9 w-full rounded-lg border border-input bg-background pl-3 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring appearance-none">
-                    <option :value="null">— Auto-pick —</option>
                     <option v-for="n in planOptions.nodes" :key="n.id" :value="n.id">{{ n.name }}</option>
                   </select>
                   <ChevronDown class="absolute right-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
                 </div>
+                <p class="text-xs text-muted-foreground mt-1">Select one or more nodes. The first node with enough resources will be used for provisioning.</p>
               </div>
             </div>
 

@@ -1,233 +1,88 @@
-<?php
 
-/*
- * This file is part of FeatherPanel.
- *
- * Copyright (C) 2025 MythicalSystems Studios
- * Copyright (C) 2025 FeatherPanel Contributors
- * Copyright (C) 2025 Cassian Gherman (aka NaysKutzu)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as published
- * by the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * See the LICENSE file or <https://www.gnu.org/licenses/>.
- */
+            // Set spell variables using defaults
+            $spellVariables = SpellVariable::getVariablesBySpellId($spellId);
+            $variablesToCreate = [];
+            foreach ($spellVariables as $sv) {
+                $default = $sv['default_value'] ?? '';
+                if ($default !== null && $default !== '') {
+                    $variablesToCreate[] = ['variable_id' => (int) $sv['id'], 'variable_value' => (string) $default];
+                } elseif (strpos($sv['rules'] ?? '', 'required') !== false) {
+                    Server::hardDeleteServer($serverId);
 
-namespace App\Addons\billingplans\Controllers\User;
-
-use App\App;
-use App\Chat\Node;
-use App\Chat\Realm;
-use App\Chat\Spell;
-use App\Chat\Server;
-use App\Chat\Activity;
-use App\Chat\Allocation;
-use App\Helpers\UUIDUtils;
-use App\Chat\SpellVariable;
-use App\Chat\ServerVariable;
-use App\Helpers\ApiResponse;
-use App\Services\Wings\Wings;
-use OpenApi\Attributes as OA;
-use App\CloudFlare\CloudFlareRealIP;
-use App\Addons\billingplans\Chat\Plan;
-use App\Addons\billingplans\Chat\Category;
-use Symfony\Component\HttpFoundation\Request;
-use App\Addons\billingplans\Chat\Subscription;
-use Symfony\Component\HttpFoundation\Response;
-use App\Addons\billingcore\Helpers\CreditsHelper;
-use App\Addons\billingplans\Helpers\InvoiceHelper;
-
-#[OA\Tag(name: 'User - Billing Plans', description: 'Browse and purchase billing plans')]
-class PlansController
-{
-    #[OA\Get(
-        path: '/api/user/billingplans/plans',
-        summary: 'List available plans',
-        tags: ['User - Billing Plans'],
-        responses: [new OA\Response(response: 200, description: 'Plans retrieved successfully')]
-    )]
-    public function list(Request $request): Response
-    {
-        $user = $request->get('user');
-        $categoryFilter = $request->query->get('category_id') !== null && $request->query->get('category_id') !== ''
-            ? (int) $request->query->get('category_id')
-            : null;
-
-        $plans = Plan::getAll(true);
-
-        $userCredits = CreditsHelper::getUserCredits((int) $user['id']);
-
-        $allRealms = Realm::getAll(null, 500, 0) ?: [];
-        $realmMap = [];
-        foreach ($allRealms as $r) {
-            $realmMap[(int) $r['id']] = ['id' => (int) $r['id'], 'name' => $r['name']];
-        }
-        $allSpells = Spell::getAllSpells() ?: [];
-        $spellMap = [];
-        foreach ($allSpells as $s) {
-            $spellMap[(int) $s['id']] = ['id' => (int) $s['id'], 'name' => $s['name'], 'realm_id' => (int) ($s['realm_id'] ?? 0)];
-        }
-
-        foreach ($plans as &$plan) {
-            $plan['billing_period_label'] = Plan::getBillingPeriodLabel((int) $plan['billing_period_days']);
-            $plan['can_afford'] = $userCredits >= (int) $plan['price_credits'];
-            $plan['has_server_template'] = !empty($plan['spell_id']) || !empty($plan['user_can_choose_spell']);
-            $activeCount = Plan::getActiveSubscriptionCount((int) $plan['id']);
-            $plan['active_subscription_count'] = $activeCount;
-            $plan['slots_available'] = !empty($plan['max_subscriptions'])
-                ? max(0, (int) $plan['max_subscriptions'] - $activeCount)
-                : null;
-            $plan['is_sold_out'] = !empty($plan['max_subscriptions']) && $activeCount >= (int) $plan['max_subscriptions'];
-
-            $plan['user_can_choose_realm'] = (bool) ($plan['user_can_choose_realm'] ?? false);
-            $plan['user_can_choose_spell'] = (bool) ($plan['user_can_choose_spell'] ?? false);
-
-            $allowedRealmIds = Plan::decodeIds($plan['allowed_realms'] ?? null);
-            $allowedSpellIds = Plan::decodeIds($plan['allowed_spells'] ?? null);
-
-            $plan['allowed_realms_options'] = empty($allowedRealmIds)
-                ? array_values($realmMap)
-                : array_values(array_filter($realmMap, fn ($r) => in_array($r['id'], $allowedRealmIds, true)));
-
-            $plan['allowed_spells_options'] = empty($allowedSpellIds)
-                ? array_values($spellMap)
-                : array_values(array_filter($spellMap, fn ($s) => in_array($s['id'], $allowedSpellIds, true)));
-
-            // Resolve category
-            $catId = (int) ($plan['category_id'] ?? 0);
-            if ($catId) {
-                $cat = Category::getById($catId);
-                $plan['category'] = $cat ? ['id' => (int) $cat['id'], 'name' => $cat['name'], 'icon' => $cat['icon'], 'color' => $cat['color']] : null;
-            } else {
-                $plan['category'] = null;
+                    return ['success' => false, 'error' => 'Required variable "' . $sv['name'] . '" has no default', 'code' => 'MISSING_REQUIRED_VARIABLE'];
+                }
+            }
+            if (!empty($variablesToCreate)) {
+                ServerVariable::createOrUpdateServerVariables($serverId, $variablesToCreate);
             }
 
-            unset($plan['server_config'], $plan['startup_override'], $plan['image_override'], $plan['node_id'], $plan['allowed_realms'], $plan['allowed_spells']);
-        }
+            // Register with Wings
+            $wings = new Wings($node['fqdn'], $node['daemonListen'], $node['scheme'], $node['daemon_token'], 30);
+            $response = $wings->getServer()->createServer(['uuid' => $uuid, 'start_on_completion' => true]);
+            if (!$response->isSuccessful()) {
+                Server::hardDeleteServer($serverId);
+                $err = $response->getError();
+                $err = is_string($err) && $err !== '' ? $err : 'Unknown Wings response';
 
-        // Apply category filter after enrichment
-        if ($categoryFilter !== null) {
-            $plans = array_values(array_filter($plans, fn ($p) => (int) ($p['category_id'] ?? 0) === $categoryFilter));
-        }
+                return [
+                    'success' => false,
+                    'error' => 'Daemon rejected server creation: ' . $err,
+                    'code' => 'WINGS_ERROR',
+                ];
+            }
 
-        return ApiResponse::success([
-            'data' => $plans,
-            'user_credits' => $userCredits,
-        ], 'Plans retrieved successfully', 200);
+            $app->getLogger()->info("BillingPlans: Server {$uuid} provisioned for user #{$userId} (plan: {$plan['name']}).");
+
+            return ['success' => true, 'uuid' => $uuid];
+        } catch (\Throwable $e) {
+            $app->getLogger()->error('BillingPlans: Server provisioning failed: ' . $e->getMessage());
+
+            return [
+                'success' => false,
+                'error' => 'Provisioning failed: ' . ($e->getMessage() !== '' ? $e->getMessage() : 'unexpected error'),
+                'code' => 'PROVISION_EXCEPTION',
+            ];
+        }
     }
 
-    #[OA\Get(
-        path: '/api/user/billingplans/plans/{planId}',
-        summary: 'Get a plan',
-        tags: ['User - Billing Plans'],
-        parameters: [new OA\Parameter(name: 'planId', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
-        responses: [
-            new OA\Response(response: 200, description: 'Plan retrieved successfully'),
-            new OA\Response(response: 404, description: 'Plan not found or inactive'),
-        ]
-    )]
-    public function get(Request $request, int $planId): Response
+    /**
+     * Try each node in order, return first with enough resources and a free allocation.
+     * @param int[] $nodeIds
+     * @param array $requirements ['memory'=>int, 'disk'=>int, 'cpu'=>int]
+     * @return int|null
+     */
+    private function resolveProvisionNode(array $nodeIds, array $requirements): ?int
     {
-        $user = $request->get('user');
-        $plan = Plan::getById($planId);
-        if ($plan === null || !(int) $plan['is_active']) {
-            return ApiResponse::error('Plan not found', 'PLAN_NOT_FOUND', 404);
+        foreach ($nodeIds as $nodeId) {
+            if ($this->nodeHasCapacity($nodeId, $requirements)) {
+                return $nodeId;
+            }
         }
-
-        $plan['billing_period_label'] = Plan::getBillingPeriodLabel((int) $plan['billing_period_days']);
-        $userCredits = CreditsHelper::getUserCredits((int) $user['id']);
-        $plan['can_afford'] = $userCredits >= (int) $plan['price_credits'];
-        $plan['user_credits'] = $userCredits;
-        $plan['has_server_template'] = !empty($plan['spell_id']);
-        unset($plan['server_config'], $plan['startup_override'], $plan['image_override'], $plan['node_id']);
-
-        return ApiResponse::success($plan, 'Plan retrieved successfully', 200);
+        return null;
     }
 
-    #[OA\Post(
-        path: '/api/user/billingplans/plans/{planId}/subscribe',
-        summary: 'Subscribe to a plan',
-        description: 'Deducts the plan price from user credits, creates a subscription, and auto-provisions a server if the plan has a server template.',
-        tags: ['User - Billing Plans'],
-        parameters: [new OA\Parameter(name: 'planId', in: 'path', required: true, schema: new OA\Schema(type: 'integer'))],
-        requestBody: new OA\RequestBody(
-            required: false,
-            content: new OA\JsonContent(
-                properties: [
-                    new OA\Property(property: 'server_name', type: 'string', description: 'Custom server name (optional, defaults to plan name)'),
-                ]
-            )
-        ),
-        responses: [
-            new OA\Response(response: 200, description: 'Subscription created successfully'),
-            new OA\Response(response: 400, description: 'Insufficient credits or invalid plan'),
-            new OA\Response(response: 404, description: 'Plan not found or inactive'),
-        ]
-    )]
-    public function subscribe(Request $request, int $planId): Response
+    /**
+     * Check if node exists, is enabled, has enough free memory/disk/cpu, and at least one free allocation.
+     * @param int $nodeId
+     * @param array $requirements
+     * @return bool
+     */
+    private function nodeHasCapacity(int $nodeId, array $requirements): bool
     {
-        $user = $request->get('user');
-        $userId = (int) $user['id'];
-        $input = json_decode($request->getContent(), true) ?? [];
-
-        $plan = Plan::getById($planId);
-        if ($plan === null || !(int) $plan['is_active']) {
-            return ApiResponse::error('Plan not found or inactive', 'PLAN_NOT_FOUND', 404);
+        $node = \App\Chat\Node::getNodeById($nodeId);
+        if (!$node || empty($node['is_enabled'])) return false;
+        // Check free resources (memory, disk, cpu)
+        $freeMem = (int)($node['memory'] ?? 0) - (int)($node['memory_used'] ?? 0);
+        $freeDisk = (int)($node['disk'] ?? 0) - (int)($node['disk_used'] ?? 0);
+        $freeCpu = (int)($node['cpu'] ?? 0) - (int)($node['cpu_used'] ?? 0);
+        if ($freeMem < $requirements['memory'] || $freeDisk < $requirements['disk'] || $freeCpu < $requirements['cpu']) {
+            return false;
         }
-
-        $priceCredits = (int) $plan['price_credits'];
-        $periodDays = (int) $plan['billing_period_days'];
-        $userCredits = CreditsHelper::getUserCredits($userId);
-
-        // Stock control
-        if (!empty($plan['max_subscriptions'])) {
-            $activeCount = Plan::getActiveSubscriptionCount($planId);
-            if ($activeCount >= (int) $plan['max_subscriptions']) {
-                return ApiResponse::error(
-                    "This plan is sold out. All {$plan['max_subscriptions']} slots are taken.",
-                    'PLAN_SOLD_OUT',
-                    400
-                );
-            }
-        }
-
-        if ($userCredits < $priceCredits) {
-            return ApiResponse::error(
-                "Insufficient credits. You need {$priceCredits} credits but only have {$userCredits}.",
-                'INSUFFICIENT_CREDITS',
-                400
-            );
-        }
-
-        if (!CreditsHelper::removeUserCredits($userId, $priceCredits)) {
-            return ApiResponse::error('Failed to process payment. Please try again.', 'PAYMENT_FAILED', 500);
-        }
-
-        // Resolve effective realm and spell (forced or user-chosen)
-        $effectiveRealmId = $plan['realms_id'] ? (int) $plan['realms_id'] : null;
-        $effectiveSpellId = $plan['spell_id'] ? (int) $plan['spell_id'] : null;
-
-        if (!empty($plan['user_can_choose_realm'])) {
-            $chosenRealmId = isset($input['chosen_realm_id']) && $input['chosen_realm_id'] ? (int) $input['chosen_realm_id'] : null;
-            if (!$chosenRealmId) {
-                CreditsHelper::addUserCredits($userId, $priceCredits);
-
-                return ApiResponse::error('Please select a realm for your server.', 'REALM_REQUIRED', 400);
-            }
-            $allowedRealmIds = Plan::decodeIds($plan['allowed_realms'] ?? null);
-            if (!empty($allowedRealmIds) && !in_array($chosenRealmId, $allowedRealmIds, true)) {
-                CreditsHelper::addUserCredits($userId, $priceCredits);
-
-                return ApiResponse::error('The selected realm is not allowed for this plan.', 'REALM_NOT_ALLOWED', 400);
-            }
-            $effectiveRealmId = $chosenRealmId;
-        }
-
-        if (!empty($plan['user_can_choose_spell'])) {
-            $chosenSpellId = isset($input['chosen_spell_id']) && $input['chosen_spell_id'] ? (int) $input['chosen_spell_id'] : null;
-            if (!$chosenSpellId) {
+        // At least one free allocation
+        $allocs = \App\Chat\Allocation::getAll(null, $nodeId, null, 1, 0, true);
+        if (empty($allocs)) return false;
+        return true;
+    }
                 CreditsHelper::addUserCredits($userId, $priceCredits);
 
                 return ApiResponse::error('Please select a spell (game type) for your server.', 'SPELL_REQUIRED', 400);
@@ -405,40 +260,68 @@ class PlansController
                 ];
             }
 
-            // Resolve node
-            $nodeId = null;
-            $allNodes = Node::getAllNodes() ?: [];
-            if (!empty($plan['node_id'])) {
-                $nodeId = (int) $plan['node_id'];
-            } else {
-                if ($allNodes === []) {
-                    return [
-                        'success' => false,
-                        'error' => 'No nodes are configured in the panel. Add a node before selling server products.',
-                        'code' => 'NO_NODES_IN_PANEL',
-                    ];
-                }
-                foreach ($allNodes as $n) {
-                    $free = Allocation::getAll(null, (int) $n['id'], null, 1, 0, true);
-                    if (!empty($free)) {
-                        $nodeId = (int) $n['id'];
-                        break;
-                    }
-                }
-            }
 
+            // Multi-node support: resolve node from node_ids (ordered)
+            $requirements = [
+                'memory' => (int) ($plan['memory'] ?? 512),
+                'disk' => (int) ($plan['disk'] ?? 1024),
+                'cpu' => (int) ($plan['cpu'] ?? 100),
+            ];
+            $nodeIds = \App\Addons\billingplans\Chat\Plan::getNodeIds($plan);
+            $nodeId = $this->resolveProvisionNode($nodeIds, $requirements);
             if (!$nodeId) {
                 return [
                     'success' => false,
-                    'error' => 'No node has free allocations. Add allocations or free an IP on a node.',
+                    'error' => 'No selected node has enough free resources and a free allocation. Add allocations or free up resources.',
                     'code' => 'NO_AVAILABLE_NODE',
                 ];
             }
-
             $node = Node::getNodeById($nodeId);
             if (!$node) {
                 return ['success' => false, 'error' => 'The selected node no longer exists', 'code' => 'NODE_NOT_FOUND'];
             }
+
+    // ...existing code...
+}
+
+    /**
+     * Try each node in order, return first with enough resources and a free allocation.
+     * @param int[] $nodeIds
+     * @param array $requirements ['memory'=>int, 'disk'=>int, 'cpu'=>int]
+     * @return int|null
+     */
+    private function resolveProvisionNode(array $nodeIds, array $requirements): ?int
+    {
+        foreach ($nodeIds as $nodeId) {
+            if ($this->nodeHasCapacity($nodeId, $requirements)) {
+                return $nodeId;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Check if node exists, is enabled, has enough free memory/disk/cpu, and at least one free allocation.
+     * @param int $nodeId
+     * @param array $requirements
+     * @return bool
+     */
+    private function nodeHasCapacity(int $nodeId, array $requirements): bool
+    {
+        $node = \App\Chat\Node::getNodeById($nodeId);
+        if (!$node || empty($node['is_enabled'])) return false;
+        // Check free resources (memory, disk, cpu)
+        $freeMem = (int)($node['memory'] ?? 0) - (int)($node['memory_used'] ?? 0);
+        $freeDisk = (int)($node['disk'] ?? 0) - (int)($node['disk_used'] ?? 0);
+        $freeCpu = (int)($node['cpu'] ?? 0) - (int)($node['cpu_used'] ?? 0);
+        if ($freeMem < $requirements['memory'] || $freeDisk < $requirements['disk'] || $freeCpu < $requirements['cpu']) {
+            return false;
+        }
+        // At least one free allocation
+        $allocs = \App\Chat\Allocation::getAll(null, $nodeId, null, 1, 0, true);
+        if (empty($allocs)) return false;
+        return true;
+    }
 
             // Get free allocation
             $allocations = Allocation::getAll(null, $nodeId, null, 100, 0, true);
