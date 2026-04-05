@@ -18,8 +18,9 @@ export interface Plan {
   active_subscription_count?: number;
   slots_available?: number | null;
   is_sold_out?: boolean;
-  
-  node_id: number | null;
+
+  node_ids?: number[]; // multi-node support
+  node_id?: number | null; // legacy
   realms_id: number | null;
   spell_id: number | null;
   memory: number;
@@ -32,12 +33,12 @@ export interface Plan {
   allocation_limit: number | null;
   startup_override: string | null;
   image_override: string | null;
-  
+
   user_can_choose_realm: boolean;
   user_can_choose_spell: boolean;
   allowed_realms: number[];
   allowed_spells: number[];
-  
+
   allowed_realms_options?: { id: number; name: string }[];
   allowed_spells_options?: { id: number; name: string; realm_id: number }[];
   has_server_template?: boolean;
@@ -55,8 +56,8 @@ export interface PlanFormData {
   billing_period_days: number;
   is_active: boolean;
   max_subscriptions: number | null;
-  
-  node_id: number | null;
+
+  node_ids: number[]; // multi-node support
   realms_id: number | null;
   spell_id: number | null;
   memory: number;
@@ -69,7 +70,7 @@ export interface PlanFormData {
   allocation_limit: number | null;
   startup_override: string | null;
   image_override: string | null;
-  
+
   user_can_choose_realm: boolean;
   user_can_choose_spell: boolean;
   allowed_realms: number[];

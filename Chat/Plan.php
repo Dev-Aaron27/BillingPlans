@@ -86,13 +86,13 @@ class Plan
         $stmt = $pdo->prepare(
             'INSERT INTO ' . self::$table . '
              (category_id, name, description, long_description, price_credits, billing_period_days, is_active, max_subscriptions, server_config,
-              node_id, realms_id, user_can_choose_realm, allowed_realms,
+              node_ids, node_id, realms_id, user_can_choose_realm, allowed_realms,
               spell_id, user_can_choose_spell, allowed_spells,
               memory, cpu, disk, swap, io,
               backup_limit, database_limit, allocation_limit, startup_override, image_override)
              VALUES
              (:category_id, :name, :description, :long_description, :price_credits, :billing_period_days, :is_active, :max_subscriptions, :server_config,
-              :node_id, :realms_id, :user_can_choose_realm, :allowed_realms,
+              :node_ids, :node_id, :realms_id, :user_can_choose_realm, :allowed_realms,
               :spell_id, :user_can_choose_spell, :allowed_spells,
               :memory, :cpu, :disk, :swap, :io,
               :backup_limit, :database_limit, :allocation_limit, :startup_override, :image_override)'
@@ -107,7 +107,9 @@ class Plan
             'is_active' => isset($data['is_active']) ? (int) $data['is_active'] : 1,
             'server_config' => isset($data['server_config']) ? (is_array($data['server_config']) ? json_encode($data['server_config']) : $data['server_config']) : null,
             'max_subscriptions' => (isset($data['max_subscriptions']) && $data['max_subscriptions'] !== null && $data['max_subscriptions'] !== '') ? (int) $data['max_subscriptions'] : null,
-            'node_id' => isset($data['node_id']) && $data['node_id'] ? (int) $data['node_id'] : null,
+            // Multi-node support: store node_ids as JSON, fallback to node_id for legacy
+            'node_ids' => isset($data['node_ids']) && is_array($data['node_ids']) ? json_encode(array_map('intval', $data['node_ids'])) : (isset($data['node_id']) && $data['node_id'] ? json_encode([(int)$data['node_id']]) : null),
+            'node_id' => isset($data['node_id']) && $data['node_id'] ? (int) $data['node_id'] : null, // legacy
             'realms_id' => isset($data['realms_id']) && $data['realms_id'] ? (int) $data['realms_id'] : null,
             'user_can_choose_realm' => isset($data['user_can_choose_realm']) ? (int) (bool) $data['user_can_choose_realm'] : 0,
             'allowed_realms' => self::encodeIds($data['allowed_realms'] ?? null),
@@ -137,14 +139,13 @@ class Plan
         $allowed = [
             'category_id',
             'name', 'description', 'long_description', 'price_credits', 'billing_period_days', 'is_active', 'max_subscriptions', 'server_config',
-            'node_id', 'realms_id', 'user_can_choose_realm', 'allowed_realms',
+            'node_ids', 'node_id', 'realms_id', 'user_can_choose_realm', 'allowed_realms',
             'spell_id', 'user_can_choose_spell', 'allowed_spells',
             'memory', 'cpu', 'disk', 'swap', 'io',
             'backup_limit', 'database_limit', 'allocation_limit', 'startup_override', 'image_override',
         ];
         $sets = [];
         $params = ['id' => $id];
-
         foreach ($allowed as $field) {
             if (array_key_exists($field, $data)) {
                 $sets[] = "`{$field}` = :{$field}";
@@ -152,6 +153,8 @@ class Plan
                     $params[$field] = json_encode($data[$field]);
                 } elseif (in_array($field, ['allowed_realms', 'allowed_spells'], true)) {
                     $params[$field] = self::encodeIds($data[$field]);
+                } elseif ($field === 'node_ids') {
+                    $params[$field] = is_array($data[$field]) ? json_encode(array_map('intval', $data[$field])) : null;
                 } elseif (in_array($field, ['user_can_choose_realm', 'user_can_choose_spell'], true)) {
                     $params[$field] = (int) (bool) $data[$field];
                 } else {
@@ -167,6 +170,25 @@ class Plan
         $stmt = $pdo->prepare('UPDATE ' . self::$table . ' SET ' . implode(', ', $sets) . ' WHERE id = :id');
 
         return $stmt->execute($params);
+    }
+
+    /**
+     * Normalize node selection for a plan (node_ids[] or legacy node_id)
+     * @param array $plan
+     * @return int[]
+     */
+    public static function getNodeIds(array $plan): array
+    {
+        if (!empty($plan['node_ids'])) {
+            $ids = json_decode($plan['node_ids'], true);
+            if (is_array($ids)) {
+                return array_map('intval', $ids);
+            }
+        }
+        if (!empty($plan['node_id'])) {
+            return [(int)$plan['node_id']];
+        }
+        return [];
     }
 
     /** Count active/suspended subscriptions for a plan (for stock control). */
