@@ -136,11 +136,7 @@ const allowedSpellsPool = computed(() =>
 );
 
 
-function toggleAllowedId(list: number[], id: number): number[] {
-  return list.includes(id) ? list.filter((v) => v !== id) : [...list, id];
-}
 
-function onNodeCheckboxChange(nodeId: number, checked: boolean) {
   if (checked) {
     if (!planForm.value.node_ids.includes(nodeId)) {
       planForm.value.node_ids = [...planForm.value.node_ids, nodeId];
