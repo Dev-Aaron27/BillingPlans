@@ -144,7 +144,7 @@ const allowedSpellsPool = computed(() =>
   } else {
     planForm.value.node_ids = planForm.value.node_ids.filter((id) => id !== nodeId);
   }
-}
+
 
 function onAllowedRealmCheckboxChange(realmId: number, checked: boolean) {
   if (checked) {
