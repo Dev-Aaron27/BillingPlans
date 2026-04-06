@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Checkbox } from "@/components/ui/checkbox";
 import { ref, onMounted, computed } from "vue";
 import { useToast } from "vue-toastification";
 import {
@@ -467,14 +468,31 @@ onMounted(() => Promise.all([loadPlans(), loadSubscriptions(), loadStats(), load
               <div>
                 <label class="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Nodes</label>
                 <div class="relative">
-                  <select v-model="planForm.node_ids" multiple
-                    class="flex h-9 w-full rounded-lg border border-input bg-background pl-3 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring appearance-none">
-                    <option v-for="n in planOptions.nodes" :key="n.id" :value="n.id">{{ n.name }}</option>
-                  </select>
-                  <ChevronDown class="absolute right-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <button type="button"
+                    class="flex h-9 w-full rounded-lg border border-input bg-background pl-3 pr-8 py-2 text-sm text-left focus:outline-none focus:ring-2 focus:ring-ring appearance-none"
+                    @click="showNodesDropdown = !showNodesDropdown"
+                  >
+                    <span v-if="planForm.node_ids.length === 0" class="text-muted-foreground">Select nodes…</span>
+                    <span v-else>
+                      {{ planOptions.nodes.filter(n => planForm.node_ids.includes(n.id)).map(n => n.name).join(', ') }}
+                    </span>
+                    <ChevronDown class="absolute right-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  </button>
+                  <div v-if="showNodesDropdown" class="absolute z-20 mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    <div v-for="n in planOptions.nodes" :key="n.id" class="px-3 py-2 hover:bg-muted/50 flex items-center gap-2 cursor-pointer"
+                      @click.stop="planForm.node_ids = planForm.node_ids.includes(n.id) ? planForm.node_ids.filter(id => id !== n.id) : [...planForm.node_ids, n.id]">
+                      <Checkbox :model-value="planForm.node_ids.includes(n.id)" />
+                      <span>{{ n.name }}</span>
+                    </div>
+                  </div>
                 </div>
                 <p class="text-xs text-muted-foreground mt-1">Select one or more nodes. The first node with enough resources will be used for provisioning.</p>
               </div>
+            // Dropdown state for node selection
+            import { onClickOutside } from 'vue'
+            const showNodesDropdown = ref(false);
+            const nodesDropdownRef = ref();
+            onClickOutside(nodesDropdownRef, () => { showNodesDropdown.value = false; });
             </div>
 
             
