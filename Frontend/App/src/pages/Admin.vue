@@ -110,6 +110,7 @@ const emptyForm = (): PlanFormData => ({
   user_can_choose_spell: false, allowed_spells: [],
 });
 const planForm = ref<PlanFormData>(emptyForm());
+
 const showNodesDropdown = ref(false);
 
 function onNodeCheckboxChange(nodeId: number, checked: boolean) {
@@ -135,15 +136,6 @@ const allowedSpellsPool = computed(() =>
     : planOptions.value.spells
 );
 
-
-
-  if (checked) {
-    if (!planForm.value.node_ids.includes(nodeId)) {
-      planForm.value.node_ids = [...planForm.value.node_ids, nodeId];
-    }
-  } else {
-    planForm.value.node_ids = planForm.value.node_ids.filter((id) => id !== nodeId);
-  }
 
 
 function onAllowedRealmCheckboxChange(realmId: number, checked: boolean) {
@@ -526,18 +518,7 @@ onMounted(() => Promise.all([loadPlans(), loadSubscriptions(), loadStats(), load
                 </div>
                 <p class="text-xs text-muted-foreground mt-1">Select one or more nodes. The first node with enough resources will be used for provisioning.</p>
               </div>
-            // Dropdown state for node selection
-            const showNodesDropdown = ref(false);
-
-            function onNodeCheckboxChange(nodeId: number, checked: boolean) {
-              if (checked) {
-                if (!planForm.value.node_ids.includes(nodeId)) {
-                  planForm.value.node_ids = [...planForm.value.node_ids, nodeId];
-                }
-              } else {
-                planForm.value.node_ids = planForm.value.node_ids.filter(id => id !== nodeId);
-              }
-            }
+            // ...existing code...
             </div>
 
             
