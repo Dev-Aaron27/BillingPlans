@@ -22,6 +22,7 @@ use App\Chat\Node;
 use App\Chat\Realm;
 use App\Chat\Spell;
 use App\Chat\Server;
+use App\Chat\Database;
 use App\Chat\Activity;
 use App\Chat\Allocation;
 use App\Chat\SpellVariable;
@@ -47,10 +48,18 @@ class PlansController
         $userCredits = CreditsHelper::getUserCredits($userId);
 
         $plans = Plan::getAll(true);
+        $planIds = array_map(static fn (array $p): int => (int) ($p['id'] ?? 0), $plans);
+        $preloaded = [
+            'activeCounts' => $this->getActiveSubscriptionCounts($planIds),
+            'allRealms' => Realm::getAll(null, 500, 0) ?: [],
+            'allSpells' => Spell::getAllSpells() ?: [],
+            'realmById' => [],
+            'spellById' => [],
+        ];
         $categoryCache = [];
 
         foreach ($plans as &$plan) {
-            $plan = $this->hydratePlan($plan, $userCredits, $categoryCache);
+            $plan = $this->hydratePlan($plan, $userCredits, $categoryCache, $preloaded);
         }
 
         return ApiResponse::success([
@@ -71,7 +80,14 @@ class PlansController
         }
 
         $cache = [];
-        $plan = $this->hydratePlan($plan, $userCredits, $cache);
+        $preloaded = [
+            'activeCounts' => [(int) $plan['id'] => Plan::getActiveSubscriptionCount((int) $plan['id'])],
+            'allRealms' => Realm::getAll(null, 500, 0) ?: [],
+            'allSpells' => Spell::getAllSpells() ?: [],
+            'realmById' => [],
+            'spellById' => [],
+        ];
+        $plan = $this->hydratePlan($plan, $userCredits, $cache, $preloaded);
 
         return ApiResponse::success($plan, 'Plan retrieved successfully', 200);
     }
@@ -233,6 +249,9 @@ class PlansController
         ]);
 
         if ($subscriptionId === null) {
+            if ($serverUuid) {
+                $this->cleanupProvisionedServer($serverUuid);
+            }
             CreditsHelper::addUserCredits($userId, $priceCredits);
 
             return ApiResponse::error('Failed to create subscription. Payment has been refunded.', 'CREATE_SUBSCRIPTION_FAILED', 500);
@@ -494,15 +513,23 @@ class PlansController
     /**
      * @param array<string,mixed> $plan
      * @param array<int,array<string,mixed>|null> $categoryCache
+        * @param array{
+        *   activeCounts: array<int,int>,
+        *   allRealms: array<int,array<string,mixed>>,
+        *   allSpells: array<int,array<string,mixed>>,
+        *   realmById: array<int,array<string,mixed>|null>,
+        *   spellById: array<int,array<string,mixed>|null>
+        * } $preloaded
      * @return array<string,mixed>
      */
-    private function hydratePlan(array $plan, int $userCredits, array &$categoryCache): array
+        private function hydratePlan(array $plan, int $userCredits, array &$categoryCache, array &$preloaded): array
     {
         $plan['billing_period_label'] = Plan::getBillingPeriodLabel((int) ($plan['billing_period_days'] ?? 30));
         $plan['can_afford'] = $userCredits >= (int) ($plan['price_credits'] ?? 0);
         $plan['has_server_template'] = !empty($plan['realms_id']) && !empty($plan['spell_id']);
 
-        $activeSubscriptionCount = Plan::getActiveSubscriptionCount((int) ($plan['id'] ?? 0));
+        $planId = (int) ($plan['id'] ?? 0);
+        $activeSubscriptionCount = (int) ($preloaded['activeCounts'][$planId] ?? 0);
         $plan['active_subscription_count'] = $activeSubscriptionCount;
 
         $maxSubscriptions = isset($plan['max_subscriptions']) && $plan['max_subscriptions'] !== null
@@ -517,8 +544,8 @@ class PlansController
         $allowedRealmIds = Plan::decodeIds($plan['allowed_realms'] ?? null);
         $allowedSpellIds = Plan::decodeIds($plan['allowed_spells'] ?? null);
 
-        $plan['allowed_realms_options'] = $this->resolveRealmOptions($plan, $allowedRealmIds);
-        $plan['allowed_spells_options'] = $this->resolveSpellOptions($plan, $allowedSpellIds, $plan['allowed_realms_options']);
+        $plan['allowed_realms_options'] = $this->resolveRealmOptions($plan, $allowedRealmIds, $preloaded);
+        $plan['allowed_spells_options'] = $this->resolveSpellOptions($plan, $allowedSpellIds, $plan['allowed_realms_options'], $preloaded);
 
         $categoryId = (int) ($plan['category_id'] ?? 0);
         if ($categoryId > 0) {
@@ -542,28 +569,34 @@ class PlansController
     /**
      * @param array<string,mixed> $plan
      * @param int[] $allowedRealmIds
+     * @param array{
+     *   activeCounts: array<int,int>,
+     *   allRealms: array<int,array<string,mixed>>,
+     *   allSpells: array<int,array<string,mixed>>,
+     *   realmById: array<int,array<string,mixed>|null>,
+     *   spellById: array<int,array<string,mixed>|null>
+     * } $preloaded
      * @return array<int,array{id:int,name:string}>
      */
-    private function resolveRealmOptions(array $plan, array $allowedRealmIds): array
+    private function resolveRealmOptions(array $plan, array $allowedRealmIds, array &$preloaded): array
     {
         $options = [];
 
         if (!empty($plan['user_can_choose_realm'])) {
             if (!empty($allowedRealmIds)) {
                 foreach ($allowedRealmIds as $realmId) {
-                    $realm = Realm::getById((int) $realmId);
+                    $realm = $this->getRealmByIdCached((int) $realmId, $preloaded);
                     if ($realm !== null) {
                         $options[] = ['id' => (int) $realm['id'], 'name' => (string) $realm['name']];
                     }
                 }
             } else {
-                $allRealms = Realm::getAll(null, 500, 0) ?: [];
-                foreach ($allRealms as $realm) {
+                foreach ($preloaded['allRealms'] as $realm) {
                     $options[] = ['id' => (int) $realm['id'], 'name' => (string) $realm['name']];
                 }
             }
         } elseif (!empty($plan['realms_id'])) {
-            $realm = Realm::getById((int) $plan['realms_id']);
+            $realm = $this->getRealmByIdCached((int) $plan['realms_id'], $preloaded);
             if ($realm !== null) {
                 $options[] = ['id' => (int) $realm['id'], 'name' => (string) $realm['name']];
             }
@@ -576,9 +609,16 @@ class PlansController
      * @param array<string,mixed> $plan
      * @param int[] $allowedSpellIds
      * @param array<int,array{id:int,name:string}> $allowedRealmOptions
+        * @param array{
+        *   activeCounts: array<int,int>,
+        *   allRealms: array<int,array<string,mixed>>,
+        *   allSpells: array<int,array<string,mixed>>,
+        *   realmById: array<int,array<string,mixed>|null>,
+        *   spellById: array<int,array<string,mixed>|null>
+        * } $preloaded
      * @return array<int,array{id:int,name:string,realm_id:int}>
      */
-    private function resolveSpellOptions(array $plan, array $allowedSpellIds, array $allowedRealmOptions): array
+        private function resolveSpellOptions(array $plan, array $allowedSpellIds, array $allowedRealmOptions, array &$preloaded): array
     {
         $options = [];
         $allowedRealmSet = [];
@@ -589,7 +629,7 @@ class PlansController
         if (!empty($plan['user_can_choose_spell'])) {
             if (!empty($allowedSpellIds)) {
                 foreach ($allowedSpellIds as $spellId) {
-                    $spell = Spell::getSpellById((int) $spellId);
+                    $spell = $this->getSpellByIdCached((int) $spellId, $preloaded);
                     if ($spell !== null) {
                         $realmId = (int) ($spell['realm_id'] ?? 0);
                         if (!empty($allowedRealmSet) && !isset($allowedRealmSet[$realmId])) {
@@ -603,8 +643,7 @@ class PlansController
                     }
                 }
             } else {
-                $allSpells = Spell::getAllSpells() ?: [];
-                foreach ($allSpells as $spell) {
+                foreach ($preloaded['allSpells'] as $spell) {
                     $realmId = (int) ($spell['realm_id'] ?? 0);
                     if (!empty($allowedRealmSet) && !isset($allowedRealmSet[$realmId])) {
                         continue;
@@ -617,7 +656,7 @@ class PlansController
                 }
             }
         } elseif (!empty($plan['spell_id'])) {
-            $spell = Spell::getSpellById((int) $plan['spell_id']);
+            $spell = $this->getSpellByIdCached((int) $plan['spell_id'], $preloaded);
             if ($spell !== null) {
                 $options[] = [
                     'id' => (int) $spell['id'],
@@ -628,5 +667,101 @@ class PlansController
         }
 
         return array_values($options);
+    }
+
+    /**
+     * @param int[] $planIds
+     * @return array<int,int>
+     */
+    private function getActiveSubscriptionCounts(array $planIds): array
+    {
+        $planIds = array_values(array_filter(array_map('intval', $planIds), static fn (int $id): bool => $id > 0));
+        if (empty($planIds)) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($planIds), '?'));
+        $pdo = Database::getPdoConnection();
+        $stmt = $pdo->prepare(
+            "SELECT plan_id, COUNT(*) AS count
+             FROM featherpanel_billingplans_subscriptions
+             WHERE plan_id IN ({$placeholders}) AND status IN ('active','suspended','pending')
+             GROUP BY plan_id"
+        );
+        $stmt->execute($planIds);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+
+        $counts = [];
+        foreach ($rows as $row) {
+            $counts[(int) $row['plan_id']] = (int) $row['count'];
+        }
+
+        return $counts;
+    }
+
+    /**
+     * @param array{
+     *   activeCounts: array<int,int>,
+     *   allRealms: array<int,array<string,mixed>>,
+     *   allSpells: array<int,array<string,mixed>>,
+     *   realmById: array<int,array<string,mixed>|null>,
+     *   spellById: array<int,array<string,mixed>|null>
+     * } $preloaded
+     * @return array<string,mixed>|null
+     */
+    private function getRealmByIdCached(int $realmId, array &$preloaded): ?array
+    {
+        if ($realmId <= 0) {
+            return null;
+        }
+        if (!array_key_exists($realmId, $preloaded['realmById'])) {
+            $match = null;
+            foreach ($preloaded['allRealms'] as $realm) {
+                if ((int) ($realm['id'] ?? 0) === $realmId) {
+                    $match = $realm;
+                    break;
+                }
+            }
+            $preloaded['realmById'][$realmId] = $match ?: Realm::getById($realmId);
+        }
+
+        return $preloaded['realmById'][$realmId];
+    }
+
+    /**
+     * @param array{
+     *   activeCounts: array<int,int>,
+     *   allRealms: array<int,array<string,mixed>>,
+     *   allSpells: array<int,array<string,mixed>>,
+     *   realmById: array<int,array<string,mixed>|null>,
+     *   spellById: array<int,array<string,mixed>|null>
+     * } $preloaded
+     * @return array<string,mixed>|null
+     */
+    private function getSpellByIdCached(int $spellId, array &$preloaded): ?array
+    {
+        if ($spellId <= 0) {
+            return null;
+        }
+        if (!array_key_exists($spellId, $preloaded['spellById'])) {
+            $match = null;
+            foreach ($preloaded['allSpells'] as $spell) {
+                if ((int) ($spell['id'] ?? 0) === $spellId) {
+                    $match = $spell;
+                    break;
+                }
+            }
+            $preloaded['spellById'][$spellId] = $match ?: Spell::getSpellById($spellId);
+        }
+
+        return $preloaded['spellById'][$spellId];
+    }
+
+    private function cleanupProvisionedServer(string $serverUuid): void
+    {
+        $server = Server::getServerByUuid($serverUuid);
+        if ($server && !empty($server['id'])) {
+            Server::hardDeleteServer((int) $server['id']);
+        }
     }
 }

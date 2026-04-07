@@ -6,15 +6,18 @@
       :checked="modelValue"
       @change="onChange"
     />
-    <span class="ml-2"><slot /></span>
+    <span v-if="slots.default" class="ml-2"><slot /></span>
   </label>
 </template>
 
 <script setup lang="ts">
+import { useSlots } from "vue";
+
 const props = defineProps({
   modelValue: Boolean
 });
 const emit = defineEmits(['update:modelValue']);
+const slots = useSlots();
 
 function onChange(event: Event) {
   const target = event.target as HTMLInputElement | null;

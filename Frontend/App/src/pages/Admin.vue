@@ -123,6 +123,14 @@ function onNodeCheckboxChange(nodeId: number, checked: boolean) {
   }
 }
 
+function onNodesDropdownFocusOut(event: FocusEvent) {
+  const current = event.currentTarget as HTMLElement | null;
+  const next = event.relatedTarget as Node | null;
+  if (!current || !next || !current.contains(next)) {
+    showNodesDropdown.value = false;
+  }
+}
+
 const filteredSpells = computed(() =>
   planForm.value.realms_id
     ? planOptions.value.spells.filter((s) => s.realm_id === planForm.value.realms_id)
@@ -497,25 +505,29 @@ onMounted(() => Promise.all([loadPlans(), loadSubscriptions(), loadStats(), load
               </div>
               <div>
                 <label class="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Nodes</label>
-                <p class="text-xs text-muted-foreground mt-1">Select one or more nodes. The first node with enough resources will be used for provisioning.</p>
-              </div>
-            <div class="relative">
-              <button type="button"
-                class="flex h-9 w-full rounded-lg border border-input bg-background pl-3 pr-8 py-2 text-sm text-left focus:outline-none focus:ring-2 focus:ring-ring appearance-none"
-                @click="showNodesDropdown = !showNodesDropdown"
-              >
-                <span v-if="planForm.node_ids.length === 0" class="text-muted-foreground">Select nodes…</span>
-                <span v-else>
-                  {{ planOptions.nodes.filter(n => planForm.node_ids.includes(n.id)).map(n => n.name).join(', ') }}
-                </span>
-                <ChevronDown class="absolute right-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-              </button>
-              <div v-if="showNodesDropdown" class="absolute z-20 mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                <div v-for="n in planOptions.nodes" :key="n.id" class="px-3 py-2 hover:bg-muted/50 flex items-center gap-2 cursor-pointer"
-                  @click.stop>
-                  <Checkbox :model-value="planForm.node_ids.includes(n.id)" @update:modelValue="checked => onNodeCheckboxChange(n.id, !!checked)" />
-                  <span>{{ n.name }}</span>
+                <div class="relative" @keydown.esc="showNodesDropdown = false" @focusout="onNodesDropdownFocusOut">
+                  <button type="button"
+                    class="flex h-9 w-full rounded-lg border border-input bg-background pl-3 pr-8 py-2 text-sm text-left focus:outline-none focus:ring-2 focus:ring-ring appearance-none"
+                    :aria-expanded="showNodesDropdown"
+                    aria-haspopup="listbox"
+                    aria-controls="plan-nodes-dropdown"
+                    @click="showNodesDropdown = !showNodesDropdown"
+                  >
+                    <span v-if="planForm.node_ids.length === 0" class="text-muted-foreground">Select nodes…</span>
+                    <span v-else>
+                      {{ planOptions.nodes.filter(n => planForm.node_ids.includes(n.id)).map(n => n.name).join(', ') }}
+                    </span>
+                    <ChevronDown class="absolute right-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  </button>
+                  <div id="plan-nodes-dropdown" v-if="showNodesDropdown" role="listbox" class="absolute z-20 mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                    <div v-for="n in planOptions.nodes" :key="n.id" class="px-3 py-2 hover:bg-muted/50 flex items-center gap-2" @click.stop>
+                      <Checkbox :model-value="planForm.node_ids.includes(n.id)" @update:modelValue="checked => onNodeCheckboxChange(n.id, !!checked)">
+                        {{ n.name }}
+                      </Checkbox>
+                    </div>
+                  </div>
                 </div>
+                <p class="text-xs text-muted-foreground mt-1">Select one or more nodes. The first node with enough resources will be used for provisioning.</p>
               </div>
             </div>
             </div>
