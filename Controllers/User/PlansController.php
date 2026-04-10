@@ -344,7 +344,7 @@ class PlansController
                 return ['success' => false, 'error' => 'The selected node no longer exists', 'code' => 'NODE_NOT_FOUND'];
             }
 
-            $allocations = Allocation::getAll(null, $nodeId, null, 100, 0, true);
+            $allocations = $this->getFreeNodeAllocations($nodeId, 100);
             if (empty($allocations)) {
                 $hint = !empty($plan['node_id'])
                     ? 'This plan uses a fixed node and it has no free IPs. Pick another node or create allocations.'
@@ -493,21 +493,62 @@ class PlansController
     private function nodeHasCapacity(int $nodeId, array $requirements): bool
     {
         $node = Node::getNodeById($nodeId);
-        if (!$node || empty($node['is_enabled'])) {
+        if (!$node) {
             return false;
         }
 
-        $freeMem = (int) ($node['memory'] ?? 0) - (int) ($node['memory_used'] ?? 0);
-        $freeDisk = (int) ($node['disk'] ?? 0) - (int) ($node['disk_used'] ?? 0);
-        $freeCpu = (int) ($node['cpu'] ?? 0) - (int) ($node['cpu_used'] ?? 0);
+        // Different panel versions expose node enabled and usage fields under different keys.
+        $isEnabled = $node['is_enabled'] ?? $node['enabled'] ?? $node['isEnabled'] ?? 1;
+        if ((int) $isEnabled === 0) {
+            return false;
+        }
+
+        $memCap = (int) ($node['memory'] ?? $node['memory_limit'] ?? 0);
+        $diskCap = (int) ($node['disk'] ?? $node['disk_limit'] ?? 0);
+        $cpuCap = (int) ($node['cpu'] ?? $node['cpu_limit'] ?? 0);
+
+        $memUsed = (int) ($node['memory_used'] ?? $node['allocated_memory'] ?? $node['memoryAllocated'] ?? 0);
+        $diskUsed = (int) ($node['disk_used'] ?? $node['allocated_disk'] ?? $node['diskAllocated'] ?? 0);
+        $cpuUsed = (int) ($node['cpu_used'] ?? $node['allocated_cpu'] ?? $node['cpuAllocated'] ?? 0);
+
+        $freeMem = (int) ($node['memory_available'] ?? ($memCap > 0 ? ($memCap - $memUsed) : PHP_INT_MAX));
+        $freeDisk = (int) ($node['disk_available'] ?? ($diskCap > 0 ? ($diskCap - $diskUsed) : PHP_INT_MAX));
+        $freeCpu = (int) ($node['cpu_available'] ?? ($cpuCap > 0 ? ($cpuCap - $cpuUsed) : PHP_INT_MAX));
 
         if ($freeMem < $requirements['memory'] || $freeDisk < $requirements['disk'] || $freeCpu < $requirements['cpu']) {
             return false;
         }
 
-        $allocs = Allocation::getAll(null, $nodeId, null, 1, 0, true);
+        $allocs = $this->getFreeNodeAllocations($nodeId, 1);
 
         return !empty($allocs);
+    }
+
+    /**
+     * Get free allocations on a node across allocation API variants.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function getFreeNodeAllocations(int $nodeId, int $limit = 100): array
+    {
+        $allocs = Allocation::getAll(null, $nodeId, null, $limit, 0, true) ?: [];
+
+        if (!empty($allocs)) {
+            return array_values($allocs);
+        }
+
+        // Fallback: some implementations may ignore/interpret the final boolean differently.
+        $fallback = Allocation::getAll(null, $nodeId, null, $limit, 0, false) ?: [];
+        if (empty($fallback)) {
+            return [];
+        }
+
+        return array_values(array_filter($fallback, static function (array $alloc): bool {
+            return empty($alloc['server_id'])
+                && empty($alloc['serverId'])
+                && empty($alloc['assigned'])
+                && empty($alloc['is_assigned']);
+        }));
     }
 
     /**
